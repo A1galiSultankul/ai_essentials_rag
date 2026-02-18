@@ -1,0 +1,6 @@
+qdrant_data/
+data/
+.venv/
+.idea/
+results/
+__pycache__/
