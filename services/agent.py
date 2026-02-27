@@ -9,8 +9,7 @@ from typing import List, Dict, Any, Optional
 from retrieval_tool import search_relevant_chunks, format_chunks_for_context
 
 
-# Default Gemini model (free tier). Use gemini-1.5-flash or gemini-1.5-pro.
-DEFAULT_MODEL = "gemini-1.5-flash"
+DEFAULT_MODEL = "gemini-2.0-flash"
 
 
 def _get_gemini_model(model_name: Optional[str] = None):
@@ -32,6 +31,10 @@ def answer_with_rag(
     model_name: Optional[str] = None,
     collection_name: str = "pdf_documents",
     max_context_chars: int = 6000,
+    use_reranker: bool = False,
+    retrieve_top_n: int = 20,
+    rerank_top_k: int = 5,
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
 ) -> Dict[str, Any]:
     """
     Answer a question using retrieval (tool) + Gemini generation.
@@ -57,6 +60,10 @@ def answer_with_rag(
         collection_name=collection_name,
         top_k=top_k,
         score_threshold=score_threshold,
+        use_reranker=use_reranker,
+        retrieve_top_n=retrieve_top_n,
+        rerank_top_k=rerank_top_k,
+        reranker_model=reranker_model,
     )
     context = format_chunks_for_context(results, max_chars=max_context_chars)
     sources = [
@@ -96,6 +103,10 @@ def answer_with_agent_tool(
     score_threshold: float = 0.3,
     model_name: Optional[str] = None,
     collection_name: str = "pdf_documents",
+    use_reranker: bool = False,
+    retrieve_top_n: int = 20,
+    rerank_top_k: int = 5,
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
 ) -> str:
     """
     Simple entry point: run RAG and return only the answer string.
@@ -106,5 +117,9 @@ def answer_with_agent_tool(
         score_threshold=score_threshold,
         model_name=model_name,
         collection_name=collection_name,
+        use_reranker=use_reranker,
+        retrieve_top_n=retrieve_top_n,
+        rerank_top_k=rerank_top_k,
+        reranker_model=reranker_model,
     )
     return out["answer"]

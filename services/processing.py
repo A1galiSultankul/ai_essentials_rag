@@ -89,17 +89,15 @@ def pdf2chunks_flat(filepath: Path, chunk_size: int = 1000, chunk_overlap: int =
         all_chunks.extend(chunks)
     return all_chunks
 
-chunks_by_file = pdf2chunks(Path("data/"), chunk_size=1000, chunk_overlap=200)
+if __name__ == "__main__":
+    chunks_by_file = pdf2chunks(Path("data/"), chunk_size=1000, chunk_overlap=200)
 
-print(f"Processed {len(chunks_by_file)} files")
-for filename, chunks in chunks_by_file.items():
-    print(f"{filename}: {len(chunks)} chunks")
+    print(f"Processed {len(chunks_by_file)} files")
+    for filename, chunks in chunks_by_file.items():
+        print(f"{filename}: {len(chunks)} chunks")
 
-# Access specific file's chunks
-if "document1.pdf" in chunks_by_file:
-    print(chunks_by_file["document1.pdf"][0])
+    if "document1.pdf" in chunks_by_file:
+        print(chunks_by_file["document1.pdf"][0])
 
-
-# Option 2: Get flat list of all chunks
-all_chunks = pdf2chunks_flat(Path("data/"), chunk_size=1000, chunk_overlap=200)
-print(f"Total chunks across all files: {len(all_chunks)}")
+    all_chunks = pdf2chunks_flat(Path("data/"), chunk_size=1000, chunk_overlap=200)
+    print(f"Total chunks across all files: {len(all_chunks)}")

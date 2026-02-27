@@ -5,8 +5,10 @@ on each question, then uses Gemini as judge to score correctness. Reports accura
 """
 import os
 import csv
+import time
 import argparse
 from pathlib import Path
+from typing import Optional, List, Dict
 
 # Add project root and services to path
 import sys
@@ -16,7 +18,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "services"))
 from agent import answer_with_rag
 
 
-def load_qa_pairs(csv_path: str) -> list[dict]:
+def _call_with_retry(fn, max_retries=8, base_delay=20):
+    """Call fn(), retrying on rate-limit errors with exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except Exception as e:
+            err_name = type(e).__name__
+            err_str = str(e)
+            is_rate_limit = (
+                "ResourceExhausted" in err_name
+                or "429" in err_str
+                or "quota" in err_str.lower()
+                or "rate" in err_str.lower()
+                or "RESOURCE_EXHAUSTED" in err_str
+            )
+            if is_rate_limit and attempt < max_retries - 1:
+                wait = base_delay * (2 ** attempt)
+                print(f"  Rate limited, waiting {wait}s (attempt {attempt+1}/{max_retries})...", flush=True)
+                time.sleep(wait)
+            else:
+                raise
+    return fn()
+
+
+def load_qa_pairs(csv_path: str) -> List[Dict]:
     """
     Load QA pairs from a CSV with columns: id, paper, question, answer
     (or similar: question and answer columns required).
@@ -39,7 +65,7 @@ def llm_judge(
     question: str,
     reference_answer: str,
     model_answer: str,
-    model_name: str = "gemini-1.5-flash",
+    model_name: str = "gemini-2.0-flash",
 ) -> dict:
     """
     Use Gemini as judge: rate whether model_answer is correct given reference_answer.
@@ -71,11 +97,15 @@ Does the model's answer convey the same key facts and meaning as the reference, 
 
 def run_evaluation(
     qa_csv: str,
-    output_csv: str | None = None,
-    max_samples: int | None = None,
-    judge_model: str = "gemini-1.5-flash",
+    output_csv: Optional[str] = None,
+    max_samples: Optional[int] = None,
+    judge_model: str = "gemini-2.0-flash",
     rag_top_k: int = 5,
     rag_score_threshold: float = 0.3,
+    use_reranker: bool = False,
+    retrieve_top_n: int = 20,
+    rerank_top_k: int = 5,
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
 ) -> dict:
     """
     Run RAG on each question, then LLM-as-judge. Return metrics and optional CSV.
@@ -91,16 +121,26 @@ def run_evaluation(
         ref = row.get("answer", "").strip()
         if not q:
             continue
-        # RAG answer
-        rag_out = answer_with_rag(
-            question=q,
-            top_k=rag_top_k,
-            score_threshold=rag_score_threshold,
-            model_name=judge_model,
-        )
+        # RAG answer (with retry on rate limit)
+        print(f"[{i+1}/{len(qa_pairs)}] {q[:80]}...", flush=True)
+        rag_out = _call_with_retry(
+            lambda _q=q: answer_with_rag(
+                question=_q,
+                top_k=rag_top_k,
+                score_threshold=rag_score_threshold,
+                model_name=judge_model,
+                use_reranker=use_reranker,
+                retrieve_top_n=retrieve_top_n,
+                rerank_top_k=rerank_top_k,
+                reranker_model=reranker_model,
+            ))
         pred = rag_out.get("answer", "")
-        # Judge
-        judge_out = llm_judge(question=q, reference_answer=ref, model_answer=pred, model_name=judge_model)
+        # Judge (with retry on rate limit)
+        judge_out = _call_with_retry(
+            lambda _q=q, _ref=ref, _pred=pred: llm_judge(
+                question=_q, reference_answer=_ref,
+                model_answer=_pred, model_name=judge_model,
+            ))
         score = judge_out["score"]
         correct += score
         results.append({
@@ -134,9 +174,13 @@ def main():
     parser.add_argument("--qa-csv", default="data/qa_pairs.csv", help="Path to QA CSV (id, paper, question, answer)")
     parser.add_argument("--output-csv", default=None, help="Path to write per-row results CSV")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit number of QA pairs (for testing)")
-    parser.add_argument("--judge-model", default="gemini-1.5-flash", help="Gemini model for judge")
+    parser.add_argument("--judge-model", default="gemini-2.0-flash", help="Gemini model for judge")
     parser.add_argument("--rag-top-k", type=int, default=5, help="RAG top_k")
     parser.add_argument("--rag-threshold", type=float, default=0.3, help="RAG score threshold")
+    parser.add_argument("--use-reranker", action="store_true", help="Enable cross-encoder reranker")
+    parser.add_argument("--retrieve-top-n", type=int, default=20, help="Number of candidates to fetch before reranking")
+    parser.add_argument("--rerank-top-k", type=int, default=5, help="Number of chunks to keep after reranking")
+    parser.add_argument("--reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2", help="Cross-encoder model name")
     args = parser.parse_args()
 
     if not os.environ.get("GEMINI_API_KEY"):
@@ -150,6 +194,10 @@ def main():
         judge_model=args.judge_model,
         rag_top_k=args.rag_top_k,
         rag_score_threshold=args.rag_threshold,
+        use_reranker=args.use_reranker,
+        retrieve_top_n=args.retrieve_top_n,
+        rerank_top_k=args.rerank_top_k,
+        reranker_model=args.reranker_model,
     )
     print("Evaluation results (Retrieval + Generation, LLM-as-judge)")
     print("=" * 50)

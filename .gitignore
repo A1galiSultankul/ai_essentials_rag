@@ -4,3 +4,5 @@ data/
 .idea/
 results/
 __pycache__/
+.env
+.cursor/

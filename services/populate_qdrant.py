@@ -1,7 +1,7 @@
 from pathlib import Path
-from processing import pdf2chunks
-from embedding_manager import Embedder
-from qdrant_manager import QdrantManager
+from services.processing import pdf2chunks
+from services.embedding_manager import Embedder
+from services.qdrant_manager import QdrantManager
 from tqdm import tqdm
 
 

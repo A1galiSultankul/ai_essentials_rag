@@ -4,6 +4,15 @@ This guide explains how to run the full pipeline: **populate Qdrant from PDFs (O
 
 ---
 
+## Reranker support (new)
+
+- Optional reranker step between vector search and LLM: retrieve more chunks, then rerank with a cross-encoder to keep the best ones.
+- Default reranker model: `cross-encoder/ms-marco-MiniLM-L-6-v2` via `sentence-transformers`.
+- Typical settings: retrieve 20, rerank to 5. First run will download the model (cached afterward).
+- Baseline (no reranker) remains the default; enable via flags shown below.
+
+---
+
 ## 1. Why you always saw `chunk_index: 0`
 
 The code was using `pdf2chunks()` from `processing.py`, which returns a **dictionary** `{filename: [chunk0, chunk1, ...]}`, not a list. The loop was:
@@ -56,6 +65,8 @@ Check the dashboard: [http://localhost:6333/dashboard](http://localhost:6333/das
 pip install -r requirements.txt
 ```
 
+First reranker use will download the cross-encoder model (cached afterward).
+
 ### 3.3 Ollama embedding model
 
 Install and run Ollama, then pull the embedding model:
@@ -104,7 +115,7 @@ After this, in the Qdrant dashboard you should see real chunk text and `chunk_in
 ### 3.6 Set Gemini API key
 
 ```bash
-export GEMINI_API_KEY="your-key-from-ai-studio"
+export GEMINI_API_KEY="AIzaSyDjUbLSTmDaFnqctAHesaDL4UIlNI-ogmg"
 ```
 
 (Or set it in your shell profile / `.env` and source it.)
@@ -126,12 +137,42 @@ print('Sources:', out['sources'])
 "
 ```
 
+With reranker enabled (retrieve 20, rerank to 5):
+
+```bash
+cd services && python -c "
+from agent import answer_with_rag
+out = answer_with_rag(
+    'What is RAG and why was it introduced?',
+    use_reranker=True,
+    retrieve_top_n=20,
+    rerank_top_k=5,
+)
+print('Answer:', out['answer'])
+print('Sources:', out['sources'])
+"
+```
+
 Or use the helper that returns only the answer string:
 
 ```bash
 cd services && python -c "
 from agent import answer_with_agent_tool
 print(answer_with_agent_tool('What is RAG?'))
+"
+```
+
+With reranker:
+
+```bash
+cd services && python -c "
+from agent import answer_with_agent_tool
+print(answer_with_agent_tool(
+    'What is RAG?',
+    use_reranker=True,
+    retrieve_top_n=20,
+    rerank_top_k=5,
+))
 "
 ```
 
@@ -161,11 +202,25 @@ python evaluate.py --qa-csv data/qa_pairs.csv --output-csv results/evaluation_re
 python evaluate.py --qa-csv data/qa_pairs_sample.csv --output-csv results/sample_results.csv
 ```
 
+With reranker (retrieve 20, rerank to 5):
+
+```bash
+python evaluate.py \
+  --qa-csv data/qa_pairs.csv \
+  --output-csv results/evaluation_results_rerank.csv \
+  --use-reranker \
+  --retrieve-top-n 20 \
+  --rerank-top-k 5
+```
+
 Optional arguments:
 - `--max-samples N` – limit to first N pairs (for quick runs).
 - `--judge-model gemini-1.5-flash` – model used as judge (and for RAG in the script).
-- `--rag-top-k 5` – number of chunks retrieved per question.
+- `--rag-top-k 5` – number of chunks retrieved per question (when reranker disabled).
 - `--rag-threshold 0.3` – minimum similarity score for retrieved chunks.
+- `--use-reranker` – enable cross-encoder reranking.
+- `--retrieve-top-n` / `--rerank-top-k` – retrieve many, keep the best few.
+- `--reranker-model` – override cross-encoder model name.
 
 The script will:
 1. Load QA pairs from the CSV.
@@ -188,6 +243,7 @@ mkdir -p results
 | Populate Qdrant with chunks from PDFs | `services/populate_qdrant.py` – reads `data/*.pdf`, chunks with overlap, embeds via Ollama `nomic-embed-text`, upserts to `pdf_documents`. |
 | Ollama-based embedding model | `services/embedding_manager.py` – calls Ollama API (`nomic-embed-text`). |
 | Agent with retrieval tool | `services/agent.py` – retrieval tool in `services/retrieval_tool.py` (search Qdrant); agent uses it to get context then calls Gemini to generate the answer. |
+| Reranker (cross-encoder) | `services/reranker.py`; enable via flags in retrieval/agent/evaluate; retrieve-many then rerank to top_k before LLM. |
 | Free Gemini model | Uses `gemini-1.5-flash` (configurable); set `GEMINI_API_KEY` from Google AI Studio. |
 | LLM-as-judge assessment | `evaluate.py` – for each QA pair runs RAG, then Gemini judge (same key facts as reference? YES/NO), reports accuracy on the collected QA pairs. |
 | Question-answer pairs | CSV exported from the project [Google Sheet](https://docs.google.com/spreadsheets/d/1r61qoHTzW2Zc-c60Wiao0SM8vVECN-XLR1y8ChBkLG0/edit?usp=sharing); columns: id, paper, question, answer. |
@@ -210,10 +266,18 @@ curl -X DELETE 'http://localhost:6333/collections/pdf_documents'
 # 4. Populate Qdrant
 python -m services.populate_qdrant
 
-# 5. Set Gemini key and run evaluation
-export GEMINI_API_KEY="..."
+# 5. Set Gemini key and run evaluation (baseline)
+export GEMINI_API_KEY="AIzaSyDjUbLSTmDaFnqctAHesaDL4UIlNI-ogmg"
 mkdir -p results
 python evaluate.py --qa-csv data/qa_pairs.csv --output-csv results/evaluation_results.csv
+
+# 6. Run evaluation with reranker
+python evaluate.py \
+  --qa-csv data/qa_pairs.csv \
+  --output-csv results/evaluation_results_rerank.csv \
+  --use-reranker \
+  --retrieve-top-n 20 \
+  --rerank-top-k 5
 ```
 
 After re-populating, the Qdrant dashboard should show real chunks and correct `chunk_index` values.
