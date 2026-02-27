@@ -115,7 +115,7 @@ After this, in the Qdrant dashboard you should see real chunk text and `chunk_in
 ### 3.6 Set Gemini API key
 
 ```bash
-export GEMINI_API_KEY="AIzaSyDjUbLSTmDaFnqctAHesaDL4UIlNI-ogmg"
+export GEMINI_API_KEY=""
 ```
 
 (Or set it in your shell profile / `.env` and source it.)
